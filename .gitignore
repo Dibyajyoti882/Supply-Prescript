@@ -231,3 +231,5 @@ venv/
 # Generated model and data files
 *.joblib
 *.pkl
+ml/models/
+ml/shipments.csv
