@@ -233,3 +233,6 @@ venv/
 *.pkl
 ml/models/
 ml/shipments.csv
+ml/mock_decisions.csv
+ml/evaluation_report.json
+ml/solver_weights.json
