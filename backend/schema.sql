@@ -1,39 +1,49 @@
-
 -- Supply Prescript: Database Schema
 
+
+-- 1. Shipments: Input to the ML model
 CREATE TABLE IF NOT EXISTS shipments (
     id SERIAL PRIMARY KEY,
     supplier VARCHAR(100) NOT NULL,
-    part VARCHAR(100) NOT NULL,
-    order_date DATE NOT NULL,
-    expected_lead_days INTEGER NOT NULL,
-    actual_lead_days INTEGER,
-    delayed BOOLEAN
+    route VARCHAR(100) NOT NULL,
+    order_qty INTEGER NOT NULL,
+    planned_lead_days INTEGER NOT NULL,
+    supplier_reliability NUMERIC(5, 2),
+    port_congestion NUMERIC(5, 2),
+    weather_risk NUMERIC(5, 2),
+    delay_days INTEGER,
+    is_delayed BOOLEAN
 );
 
+-- 2. Prescriptions: Solver recommendations
 CREATE TABLE IF NOT EXISTS prescriptions (
     id SERIAL PRIMARY KEY,
     shipment_id INTEGER NOT NULL REFERENCES shipments(id),
     option VARCHAR(20) NOT NULL,
-    predicted_cost NUMERIC(12, 2) NOT NULL,
-    predicted_days_saved INTEGER NOT NULL,
+    name VARCHAR(100) NOT NULL,
+    est_cost NUMERIC(12, 2) NOT NULL,
+    days_saved NUMERIC(10, 2) NOT NULL,
+    risk NUMERIC(5, 2) NOT NULL,
+    residual_delay_days NUMERIC(10, 2),
+    fraction_used NUMERIC(5, 3),
+    total_cost NUMERIC(12, 2),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- 3. Decisions: User-selected prescription
 CREATE TABLE IF NOT EXISTS decisions (
     id SERIAL PRIMARY KEY,
     shipment_id INTEGER NOT NULL REFERENCES shipments(id),
-    option_chosen VARCHAR(20) NOT NULL,
-    chosen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    decision_user VARCHAR(100),
-    predicted_cost NUMERIC(12, 2),
-    actual_cost NUMERIC(12, 2)
+    option VARCHAR(20) NOT NULL,
+    predicted_cost NUMERIC(12, 2) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- 4. Outcomes: Actual results for evaluation
 CREATE TABLE IF NOT EXISTS outcomes (
     id SERIAL PRIMARY KEY,
     decision_id INTEGER NOT NULL REFERENCES decisions(id),
     actual_cost NUMERIC(12, 2),
-    actual_days INTEGER,
-    evaluated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    actual_delay_days INTEGER,
+    recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
