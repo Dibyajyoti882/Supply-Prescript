@@ -5,7 +5,7 @@ import sys
 import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from evaluate import MIN_SAMPLES, WEIGHT_MAX, WEIGHT_MIN, evaluate  # noqa: E402
+from evaluate import MIN_SAMPLES, WEIGHT_MAX, WEIGHT_MIN, evaluate, normalize_option  # noqa: E402
 
 
 def _df(option, predicted, actual, n=10):
@@ -48,6 +48,15 @@ def test_big_error_triggers_retrain_flag():
     assert report["needs_retrain"] is True
     report, _ = evaluate(_df("A", 10000, 10200))
     assert report["needs_retrain"] is False
+
+
+def test_option_names_are_normalized():
+    assert normalize_option("A") == "A"
+    assert normalize_option("Air Freight") == "A"
+    assert normalize_option("Secondary Supplier (+10%)") == "B"
+    assert normalize_option("Delay Product Launch") == "C"
+    _, w = evaluate(_df("Air Freight", 15000, 18000))
+    assert "A" in w
 
 
 if __name__ == "__main__":

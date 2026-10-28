@@ -32,10 +32,15 @@ Options: A = Air Freight, B = Secondary Supplier (+10%), C = Delay Product Launc
 Required fields: option, name, est_cost, days_saved, risk. The rest are optional extras for the UI.
 
 ## decisions (written by POST /decisions when "Execute Decision" is clicked)
-shipment_id, option, predicted_cost (= est_cost of the chosen option), created_at
+id, shipment_id, option, predicted_cost (= est_cost of the chosen option), created_at
+`option` should be the letter A, B or C.
 
 ## outcomes (filled in later, used by ml/evaluate.py)
-shipment_id (or decision_id), actual_cost, actual_delay_days, recorded_at
+id, decision_id (references decisions.id), actual_cost, actual_delay_days, recorded_at
+
+## Column name notes (from backend/schema.sql)
+- Every table uses `id` as its primary key (shipments.id, decisions.id, ...)
+- ml/shipments.csv uses `shipment_id`. When loading it into the database, map it to `shipments.id`.
 
 ## Closed loop
 evaluate.py compares decisions.predicted_cost with outcomes.actual_cost,
