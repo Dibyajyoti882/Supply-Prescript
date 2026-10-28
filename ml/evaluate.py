@@ -26,13 +26,29 @@ WEIGHT_MIN, WEIGHT_MAX = 0.5, 2.0
 SUCCESS_TOLERANCE = 0.10   # decision is a "success" if actual <= predicted * 1.10
 RETRAIN_THRESHOLD = 0.15   # overall error above 15% -> retrain.py should run
 
-# ---- Database settings: CHANGE THESE to match Member 2's schema.sql and backend/.env ----
+# ---- Matches Member 2's backend/schema.sql (decisions.id, outcomes.decision_id) ----
 DB_QUERY = """
-    SELECT d.decision_id, d.shipment_id, d.option, d.predicted_cost, o.actual_cost
+    SELECT d.id AS decision_id, d.shipment_id, d.option, d.predicted_cost, o.actual_cost
     FROM decisions d
-    JOIN outcomes o ON o.decision_id = d.decision_id
+    JOIN outcomes o ON o.decision_id = d.id
     WHERE o.actual_cost IS NOT NULL
 """
+
+
+def normalize_option(value):
+    """Accept 'A', 'a', 'Option A', 'Air Freight' ... and return 'A', 'B' or 'C'."""
+    v = str(value).strip().upper()
+    if v in ("A", "B", "C"):
+        return v
+    if v.startswith("OPTION ") and v[-1] in "ABC":
+        return v[-1]
+    if "AIR" in v:
+        return "A"
+    if "SUPPLIER" in v or "SECONDARY" in v:
+        return "B"
+    if "LAUNCH" in v or "DELAY" in v:
+        return "C"
+    return v
 
 
 def load_from_csv(path=MOCK_PATH):
@@ -74,6 +90,7 @@ def evaluate(df, current_weights=None):
     """Return (report, new_weights). Pure function, easy to test."""
     current_weights = dict(current_weights or {})
     df = df[df["predicted_cost"] > 0].copy()
+    df["option"] = df["option"].map(normalize_option)
     df["error"] = df["actual_cost"] - df["predicted_cost"]
     df["pct_error"] = df["error"] / df["predicted_cost"]
     df["success"] = df["actual_cost"] <= df["predicted_cost"] * (1 + SUCCESS_TOLERANCE)
