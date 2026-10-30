@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
-from db import get_connection
+from pydantic import BaseModel, Field
+from backend.db import get_connection
 
 app = FastAPI(
     title="Supply Prescript API",
@@ -11,8 +11,13 @@ app = FastAPI(
 
 class DecisionRequest(BaseModel):
     shipment_id: int
-    option: str
-    predicted_cost: float
+    option: str = Field(pattern="^[ABC]$")
+    predicted_cost: float = Field(ge=0)
+
+
+class OutcomeRequest(BaseModel):
+    decision_id: int
+    actual_cost: float = Field(ge=0)
 
 
 @app.get("/")
@@ -121,7 +126,6 @@ def create_decision(decision: DecisionRequest):
             conn.rollback()
 
         print("POST /decisions error:", repr(e))
-
         raise HTTPException(
             status_code=500,
             detail="Unable to save decision. Check backend terminal."
@@ -170,6 +174,131 @@ def get_decisions():
         raise HTTPException(
             status_code=500,
             detail="Unable to retrieve decisions"
+        )
+
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+@app.post("/outcomes")
+def create_outcome(outcome: OutcomeRequest):
+    conn = None
+
+    try:
+        conn = get_connection()
+
+        with conn.cursor() as cur:
+            # Check whether the decision exists.
+            cur.execute(
+                "SELECT id FROM decisions WHERE id = %s;",
+                (outcome.decision_id,),
+            )
+
+            if cur.fetchone() is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Decision not found"
+                )
+
+            # Save the actual cost for evaluation.
+            cur.execute(
+                """
+                INSERT INTO outcomes (
+                    decision_id,
+                    actual_cost,
+                    recorded_at
+                )
+                VALUES (%s, %s, CURRENT_TIMESTAMP)
+                RETURNING
+                    id,
+                    decision_id,
+                    actual_cost,
+                    actual_delay_days,
+                    recorded_at;
+                """,
+                (
+                    outcome.decision_id,
+                    outcome.actual_cost,
+                ),
+            )
+
+            row = cur.fetchone()
+            conn.commit()
+
+            return {
+                "message": "Outcome saved successfully",
+                "outcome": {
+                    "id": row[0],
+                    "decision_id": row[1],
+                    "actual_cost": (
+                        float(row[2]) if row[2] is not None else None
+                    ),
+                    "actual_delay_days": row[3],
+                    "recorded_at": (
+                        row[4].isoformat() if row[4] else None
+                    ),
+                },
+            }
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+        if conn is not None:
+            conn.rollback()
+
+        print("POST /outcomes error:", repr(e))
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to save outcome. Check backend terminal."
+        )
+
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+@app.get("/outcomes")
+def get_outcomes():
+    conn = None
+
+    try:
+        conn = get_connection()
+
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT
+                    id,
+                    decision_id,
+                    actual_cost,
+                    actual_delay_days,
+                    recorded_at
+                FROM outcomes
+                ORDER BY recorded_at DESC, id DESC;
+            """)
+
+            columns = [desc.name for desc in cur.description]
+            rows = cur.fetchall()
+
+            return [
+                {
+                    **dict(zip(columns, row)),
+                    "actual_cost": (
+                        float(row[2]) if row[2] is not None else None
+                    ),
+                    "recorded_at": (
+                        row[4].isoformat() if row[4] else None
+                    ),
+                }
+                for row in rows
+            ]
+
+    except Exception as e:
+        print("GET /outcomes error:", repr(e))
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to retrieve outcomes"
         )
 
     finally:
