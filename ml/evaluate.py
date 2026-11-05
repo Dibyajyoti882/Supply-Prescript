@@ -57,19 +57,24 @@ def load_from_csv(path=MOCK_PATH):
     return pd.read_csv(path)
 
 
-def load_from_db():
-    """Read finished decisions from PostgreSQL (psycopg v3, settings from backend/.env)."""
+def connect_db():
+    """Open a PostgreSQL connection (psycopg v3, settings from backend/.env)."""
     import psycopg
     from dotenv import load_dotenv
 
     load_dotenv("backend/.env")
-    conn = psycopg.connect(
+    return psycopg.connect(
         host=os.getenv("DB_HOST", "localhost"),
         port=os.getenv("DB_PORT", "5432"),
         dbname=os.getenv("DB_NAME", "supply_prescript"),
         user=os.getenv("DB_USER", "postgres"),
         password=os.getenv("DB_PASSWORD", ""),
     )
+
+
+def load_from_db():
+    """Read finished decisions from PostgreSQL."""
+    conn = connect_db()
     with conn, conn.cursor() as cur:
         cur.execute(DB_QUERY)
         cols = [c.name for c in cur.description]

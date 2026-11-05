@@ -1,7 +1,12 @@
-from fastapi import FastAPI, HTTPException
+
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+
 from backend.db import get_connection
+from ml.train import predict_delay
+from ml.solver import prescribe
+
 
 app = FastAPI(
     title="Supply Prescript API",
@@ -9,7 +14,8 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# Allow the Next.js frontend to communicate with FastAPI.
+
+# CORS configuration
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -34,6 +40,61 @@ class OutcomeRequest(BaseModel):
     actual_cost: float = Field(ge=0)
 
 
+# Helper: Fetch one shipment
+def fetch_shipment(shipment_id: int):
+    conn = None
+
+    try:
+        conn = get_connection()
+
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                    id,
+                    supplier,
+                    route,
+                    order_qty,
+                    planned_lead_days,
+                    supplier_reliability,
+                    port_congestion,
+                    weather_risk,
+                    delay_days,
+                    is_delayed
+                FROM shipments
+                WHERE id = %s;
+                """,
+                (shipment_id,),
+            )
+
+            row = cur.fetchone()
+
+            if row is None:
+                return None
+
+            columns = [desc.name for desc in cur.description]
+            shipment = dict(zip(columns, row))
+
+            # Convert numeric values for ML and solver.
+            numeric_fields = [
+                "order_qty",
+                "planned_lead_days",
+                "supplier_reliability",
+                "port_congestion",
+                "weather_risk",
+                "delay_days",
+            ]
+
+            for field in numeric_fields:
+                shipment[field] = float(shipment[field] or 0)
+
+            return shipment
+
+    finally:
+        if conn is not None:
+            conn.close()
+
+
 # Home
 @app.get("/")
 def home():
@@ -55,7 +116,8 @@ def get_shipments():
         conn = get_connection()
 
         with conn.cursor() as cur:
-            cur.execute("""
+            cur.execute(
+                """
                 SELECT
                     id AS shipment_id,
                     supplier,
@@ -69,7 +131,8 @@ def get_shipments():
                     is_delayed
                 FROM shipments
                 ORDER BY id;
-            """)
+                """
+            )
 
             columns = [desc.name for desc in cur.description]
             rows = cur.fetchall()
@@ -92,98 +155,142 @@ def get_shipments():
             conn.close()
 
 
-# Shipment delay risk assessment
+# ML shipment delay prediction
 @app.get("/predict/{shipment_id}")
 def predict_shipment(shipment_id: int):
-    conn = None
-
     try:
-        conn = get_connection()
+        shipment = fetch_shipment(shipment_id)
 
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT
-                    id,
-                    supplier,
-                    route,
-                    planned_lead_days,
-                    supplier_reliability,
-                    port_congestion,
-                    weather_risk,
-                    delay_days,
-                    is_delayed
-                FROM shipments
-                WHERE id = %s;
-                """,
-                (shipment_id,),
+        if shipment is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Shipment not found",
             )
 
-            row = cur.fetchone()
+        # Actual XGBoost prediction
+        prediction = predict_delay(shipment)
 
-            if row is None:
-                raise HTTPException(
-                    status_code=404,
-                    detail="Shipment not found",
-                )
+        probability = prediction["delay_probability"]
+        predicted_days = prediction["predicted_delay_days"]
 
-            (
-                sid,
-                supplier,
-                route,
-                planned_lead_days,
-                reliability,
-                congestion,
-                weather,
-                delay_days,
-                is_delayed,
-            ) = row
+        risk_score = round(probability * 100, 2)
 
-            reliability = float(reliability or 0)
-            congestion = float(congestion or 0)
-            weather = float(weather or 0)
+        if probability >= 0.7:
+            risk_level = "High"
+        elif probability >= 0.3:
+            risk_level = "Medium"
+        else:
+            risk_level = "Low"
 
-            # Rule-based risk score.
-            # Assumes all three input values are between 0 and 1.
-            risk_score = (
-                (1 - min(max(reliability, 0), 1)) * 40
-                + min(max(congestion, 0), 1) * 30
-                + min(max(weather, 0), 1) * 30
-            )
-
-            if risk_score >= 60:
-                risk_level = "High"
-            elif risk_score >= 30:
-                risk_level = "Medium"
-            else:
-                risk_level = "Low"
-
-            return {
-                "shipment_id": sid,
-                "supplier": supplier,
-                "route": route,
-                "planned_lead_days": planned_lead_days,
-                "risk_score": round(risk_score, 2),
-                "risk_level": risk_level,
-                "historical_delay_days": delay_days,
-                "historically_delayed": is_delayed,
-                "method": "Rule-based risk score; not an ML prediction",
-            }
+        return {
+            "shipment_id": shipment["id"],
+            "supplier": shipment["supplier"],
+            "route": shipment["route"],
+            "planned_lead_days": shipment["planned_lead_days"],
+            "risk_score": risk_score,
+            "risk_level": risk_level,
+            "delay_probability": probability,
+            "predicted_delay_days": predicted_days,
+            "historical_delay_days": shipment["delay_days"],
+            "historically_delayed": shipment["is_delayed"],
+            "method": "XGBoost ML prediction",
+        }
 
     except HTTPException:
         raise
+
+    except FileNotFoundError as e:
+        print("ML model error:", repr(e))
+
+        raise HTTPException(
+            status_code=503,
+            detail="ML models not found. Train the models first.",
+        )
 
     except Exception as e:
         print("GET /predict error:", repr(e))
 
         raise HTTPException(
             status_code=500,
-            detail="Unable to assess shipment risk",
+            detail="Unable to predict shipment delay",
         )
 
-    finally:
-        if conn is not None:
-            conn.close()
+
+# ML prediction + Prescriptive Solver
+@app.get("/prescriptions/{shipment_id}")
+def get_prescription(
+    shipment_id: int,
+    budget: float = Query(default=None, ge=0),
+):
+    try:
+        # Step 1: Fetch shipment from database
+        shipment = fetch_shipment(shipment_id)
+
+        if shipment is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Shipment not found",
+            )
+
+        # Step 2: Predict delay using XGBoost
+        prediction = predict_delay(shipment)
+
+        predicted_days = prediction["predicted_delay_days"]
+
+        # Step 3: Run existing prescriptive solver
+        options = prescribe(
+            shipment=shipment,
+            predicted_delay_days=predicted_days,
+            budget=budget,
+        )
+
+        if not options:
+            raise HTTPException(
+                status_code=500,
+                detail="Solver did not return any options",
+            )
+
+        # Solver sorts options by total_cost (best first).
+        best_option = options[0]
+
+        # Step 4: Return prediction and recommendations
+        return {
+            "shipment_id": shipment["id"],
+            "supplier": shipment["supplier"],
+            "route": shipment["route"],
+
+            "prediction": {
+                "delay_probability": prediction["delay_probability"],
+                "predicted_delay_days": predicted_days,
+            },
+
+            "budget": budget,
+
+            "recommendation": best_option,
+
+            "all_options": options,
+
+            "message": "Prediction and prescription generated successfully",
+        }
+
+    except HTTPException:
+        raise
+
+    except FileNotFoundError as e:
+        print("Model or solver file error:", repr(e))
+
+        raise HTTPException(
+            status_code=503,
+            detail="Required ML models or solver weights are unavailable.",
+        )
+
+    except Exception as e:
+        print("GET /prescriptions error:", repr(e))
+
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to generate shipment prescription",
+        )
 
 
 # Save a decision
@@ -223,11 +330,11 @@ def create_decision(decision: DecisionRequest):
                     "id": row[0],
                     "shipment_id": row[1],
                     "option": row[2],
-                    "predicted_cost": float(row[3]),
+                    "predicted_cost": (
+                        float(row[3]) if row[3] is not None else None
+                    ),
                     "created_at": (
-                        row[4].isoformat()
-                        if row[4]
-                        else None
+                        row[4].isoformat() if row[4] else None
                     ),
                 },
             }
@@ -257,7 +364,8 @@ def get_decisions():
         conn = get_connection()
 
         with conn.cursor() as cur:
-            cur.execute("""
+            cur.execute(
+                """
                 SELECT
                     id,
                     shipment_id,
@@ -266,7 +374,8 @@ def get_decisions():
                     created_at
                 FROM decisions
                 ORDER BY created_at DESC, id DESC;
-            """)
+                """
+            )
 
             columns = [desc.name for desc in cur.description]
             rows = cur.fetchall()
@@ -275,14 +384,10 @@ def get_decisions():
                 {
                     **dict(zip(columns, row)),
                     "predicted_cost": (
-                        float(row[3])
-                        if row[3] is not None
-                        else None
+                        float(row[3]) if row[3] is not None else None
                     ),
                     "created_at": (
-                        row[4].isoformat()
-                        if row[4]
-                        else None
+                        row[4].isoformat() if row[4] else None
                     ),
                 }
                 for row in rows
@@ -310,7 +415,7 @@ def create_outcome(outcome: OutcomeRequest):
         conn = get_connection()
 
         with conn.cursor() as cur:
-            # Check whether the decision exists.
+            # Check whether decision exists
             cur.execute(
                 "SELECT id FROM decisions WHERE id = %s;",
                 (outcome.decision_id,),
@@ -352,15 +457,11 @@ def create_outcome(outcome: OutcomeRequest):
                     "id": row[0],
                     "decision_id": row[1],
                     "actual_cost": (
-                        float(row[2])
-                        if row[2] is not None
-                        else None
+                        float(row[2]) if row[2] is not None else None
                     ),
                     "actual_delay_days": row[3],
                     "recorded_at": (
-                        row[4].isoformat()
-                        if row[4]
-                        else None
+                        row[4].isoformat() if row[4] else None
                     ),
                 },
             }
@@ -393,7 +494,8 @@ def get_outcomes():
         conn = get_connection()
 
         with conn.cursor() as cur:
-            cur.execute("""
+            cur.execute(
+                """
                 SELECT
                     id,
                     decision_id,
@@ -402,7 +504,8 @@ def get_outcomes():
                     recorded_at
                 FROM outcomes
                 ORDER BY recorded_at DESC, id DESC;
-            """)
+                """
+            )
 
             columns = [desc.name for desc in cur.description]
             rows = cur.fetchall()
@@ -411,14 +514,10 @@ def get_outcomes():
                 {
                     **dict(zip(columns, row)),
                     "actual_cost": (
-                        float(row[2])
-                        if row[2] is not None
-                        else None
+                        float(row[2]) if row[2] is not None else None
                     ),
                     "recorded_at": (
-                        row[4].isoformat()
-                        if row[4]
-                        else None
+                        row[4].isoformat() if row[4] else None
                     ),
                 }
                 for row in rows
