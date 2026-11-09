@@ -5,7 +5,8 @@ from pydantic import BaseModel, Field
 
 from backend.db import get_connection
 from ml.train import predict_delay
-from ml.solver import prescribe
+from ml.service import get_prescriptions, get_evaluation_report
+from ml.evaluate import main as run_evaluation
 
 
 app = FastAPI(
@@ -38,6 +39,7 @@ class DecisionRequest(BaseModel):
 class OutcomeRequest(BaseModel):
     decision_id: int
     actual_cost: float = Field(ge=0)
+    actual_delay_days: int = Field(ge=0)
 
 
 # Helper: Fetch one shipment
@@ -75,7 +77,6 @@ def fetch_shipment(shipment_id: int):
             columns = [desc.name for desc in cur.description]
             shipment = dict(zip(columns, row))
 
-            # Convert numeric values for ML and solver.
             numeric_fields = [
                 "order_qty",
                 "planned_lead_days",
@@ -98,7 +99,9 @@ def fetch_shipment(shipment_id: int):
 # Home
 @app.get("/")
 def home():
-    return {"message": "Welcome to Supply Prescript API"}
+    return {
+        "message": "Welcome to Supply Prescript API"
+    }
 
 
 # Health check
@@ -155,7 +158,7 @@ def get_shipments():
             conn.close()
 
 
-# ML shipment delay prediction
+# XGBoost shipment delay prediction
 @app.get("/predict/{shipment_id}")
 def predict_shipment(shipment_id: int):
     try:
@@ -167,7 +170,6 @@ def predict_shipment(shipment_id: int):
                 detail="Shipment not found",
             )
 
-        # Actual XGBoost prediction
         prediction = predict_delay(shipment)
 
         probability = prediction["delay_probability"]
@@ -216,14 +218,13 @@ def predict_shipment(shipment_id: int):
         )
 
 
-# ML prediction + Prescriptive Solver
+# ML prediction + Prescriptive Service
 @app.get("/prescriptions/{shipment_id}")
 def get_prescription(
     shipment_id: int,
     budget: float = Query(default=None, ge=0),
 ):
     try:
-        # Step 1: Fetch shipment from database
         shipment = fetch_shipment(shipment_id)
 
         if shipment is None:
@@ -232,56 +233,47 @@ def get_prescription(
                 detail="Shipment not found",
             )
 
-        # Step 2: Predict delay using XGBoost
-        prediction = predict_delay(shipment)
-
-        predicted_days = prediction["predicted_delay_days"]
-
-        # Step 3: Run existing prescriptive solver
-        options = prescribe(
-            shipment=shipment,
-            predicted_delay_days=predicted_days,
+        result = get_prescriptions(
+            shipment,
             budget=budget,
         )
+
+        options = result["options"]
 
         if not options:
             raise HTTPException(
                 status_code=500,
-                detail="Solver did not return any options",
+                detail="No prescription options generated",
             )
 
-        # Solver sorts options by total_cost (best first).
-        best_option = options[0]
-
-        # Step 4: Return prediction and recommendations
         return {
-            "shipment_id": shipment["id"],
+            "shipment_id": result["shipment_id"],
             "supplier": shipment["supplier"],
             "route": shipment["route"],
-
-            "prediction": {
-                "delay_probability": prediction["delay_probability"],
-                "predicted_delay_days": predicted_days,
-            },
-
-            "budget": budget,
-
-            "recommendation": best_option,
-
-            "all_options": options,
-
-            "message": "Prediction and prescription generated successfully",
+            "budget": result["budget"],
+            "prediction": result["prediction"],
+            "recommendation": options[0],
+            "options": options,
+            "message": "Prediction and prescriptions generated successfully",
         }
 
     except HTTPException:
         raise
 
     except FileNotFoundError as e:
-        print("Model or solver file error:", repr(e))
+        print("Prescription model error:", repr(e))
 
         raise HTTPException(
             status_code=503,
-            detail="Required ML models or solver weights are unavailable.",
+            detail="ML models are unavailable. Train the models first.",
+        )
+
+    except ValueError as e:
+        print("Prescription input error:", repr(e))
+
+        raise HTTPException(
+            status_code=400,
+            detail=str(e),
         )
 
     except Exception as e:
@@ -289,7 +281,7 @@ def get_prescription(
 
         raise HTTPException(
             status_code=500,
-            detail="Unable to generate shipment prescription",
+            detail="Unable to generate prescriptions",
         )
 
 
@@ -406,7 +398,7 @@ def get_decisions():
             conn.close()
 
 
-# Save an outcome
+# Save an outcome and automatically update evaluation report
 @app.post("/outcomes")
 def create_outcome(outcome: OutcomeRequest):
     conn = None
@@ -415,7 +407,8 @@ def create_outcome(outcome: OutcomeRequest):
         conn = get_connection()
 
         with conn.cursor() as cur:
-            # Check whether decision exists
+
+            # Check whether the decision exists
             cur.execute(
                 "SELECT id FROM decisions WHERE id = %s;",
                 (outcome.decision_id,),
@@ -427,14 +420,16 @@ def create_outcome(outcome: OutcomeRequest):
                     detail="Decision not found",
                 )
 
+            # Save actual cost and actual delay
             cur.execute(
                 """
                 INSERT INTO outcomes (
                     decision_id,
                     actual_cost,
+                    actual_delay_days,
                     recorded_at
                 )
-                VALUES (%s, %s, CURRENT_TIMESTAMP)
+                VALUES (%s, %s, %s, CURRENT_TIMESTAMP)
                 RETURNING
                     id,
                     decision_id,
@@ -445,26 +440,54 @@ def create_outcome(outcome: OutcomeRequest):
                 (
                     outcome.decision_id,
                     outcome.actual_cost,
+                    outcome.actual_delay_days,
                 ),
             )
 
             row = cur.fetchone()
             conn.commit()
 
-            return {
-                "message": "Outcome saved successfully",
-                "outcome": {
-                    "id": row[0],
-                    "decision_id": row[1],
-                    "actual_cost": (
-                        float(row[2]) if row[2] is not None else None
-                    ),
-                    "actual_delay_days": row[3],
-                    "recorded_at": (
-                        row[4].isoformat() if row[4] else None
-                    ),
-                },
+            saved_outcome = {
+                "id": row[0],
+                "decision_id": row[1],
+                "actual_cost": (
+                    float(row[2]) if row[2] is not None else None
+                ),
+                "actual_delay_days": row[3],
+                "recorded_at": (
+                    row[4].isoformat() if row[4] else None
+                ),
             }
+
+        # Automatically regenerate evaluation report
+        # The outcome is already committed before evaluation starts.
+        evaluation_updated = False
+        evaluation_error = None
+
+        try:
+            report = run_evaluation(use_db=True)
+            evaluation_updated = True
+
+            print(
+                "Automatic evaluation completed:",
+                report["total_decisions"],
+                "decisions evaluated",
+            )
+
+        except Exception as evaluation_exception:
+            evaluation_error = str(evaluation_exception)
+
+            print(
+                "Automatic evaluation failed:",
+                repr(evaluation_exception),
+            )
+
+        return {
+            "message": "Outcome saved successfully",
+            "outcome": saved_outcome,
+            "evaluation_updated": evaluation_updated,
+            "evaluation_error": evaluation_error,
+        }
 
     except HTTPException:
         raise
@@ -516,6 +539,7 @@ def get_outcomes():
                     "actual_cost": (
                         float(row[2]) if row[2] is not None else None
                     ),
+                    "actual_delay_days": row[3],
                     "recorded_at": (
                         row[4].isoformat() if row[4] else None
                     ),
@@ -534,3 +558,29 @@ def get_outcomes():
     finally:
         if conn is not None:
             conn.close()
+
+
+# Get Decision ROI evaluation report
+@app.get("/evaluation-report")
+def get_roi_report():
+    try:
+        report = get_evaluation_report()
+
+        if report is None:
+            return {
+                "message": "Evaluation report is not available yet.",
+                "report": None,
+            }
+
+        return {
+            "message": "Evaluation report retrieved successfully",
+            "report": report,
+        }
+
+    except Exception as e:
+        print("GET /evaluation-report error:", repr(e))
+
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to retrieve evaluation report",
+        )
