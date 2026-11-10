@@ -77,7 +77,7 @@ Legend: [x] done, [ ] pending. Update this file when a task is finished.
 
 - [x] Create the GitHub repo and invite each other
 - [x] Create `docs/data_contract.md`
-- [ ] Check that `schema.sql` column names match `data_contract.md`
+- [x] Check that `schema.sql` column names match `data_contract.md`
 - [ ] Review each other's Pull Requests
 - [ ] Keep the README updated
 - [ ] Rehearse the final demo together
