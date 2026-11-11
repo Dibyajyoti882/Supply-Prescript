@@ -772,7 +772,7 @@ export default function Home() {
   );
 
   return (
-    <div className="min-h-screen bg-slate-100 text-slate-900 md:flex">
+    <div className="supply-app min-h-screen bg-slate-100 text-slate-900 md:flex">
       {/* Sidebar */}
       <aside className="flex w-full flex-col border-r border-slate-200 bg-white md:sticky md:top-0 md:h-screen md:w-64 md:shrink-0">
         <div className="border-b border-slate-100 px-6 py-6">

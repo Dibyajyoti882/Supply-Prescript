@@ -32,7 +32,7 @@ PROMOTE_TOLERANCE = 0.02   # new model may be at most 2% worse (MAE) than the ol
 DELAY_THRESHOLD_DAYS = 3   # same rule as data_gen.py: delayed if more than 3 days
 
 SHIPMENTS_QUERY = """
-    SELECT id AS shipment_id, supplier, route, order_qty, planned_lead_days,
+     SELECT id AS shipment_id, supplier, route, order_qty, planned_lead_days,
            supplier_reliability, port_congestion, weather_risk, delay_days, is_delayed
     FROM shipments
     WHERE delay_days IS NOT NULL
@@ -42,6 +42,7 @@ OUTCOMES_QUERY = """
     FROM outcomes o
     JOIN decisions d ON d.id = o.decision_id
     WHERE o.actual_delay_days IS NOT NULL
+    ORDER BY d.shipment_id, o.recorded_at, o.id
 """
 
 

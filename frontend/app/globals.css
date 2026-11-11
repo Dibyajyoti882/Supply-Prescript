@@ -24,3 +24,217 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* =========================================
+   SUPPLY PRESCRIPT - MODERN UI THEME
+========================================= */
+
+.supply-app {
+  --sp-primary: #2563eb;
+  --sp-dark: #101b35;
+  --sp-muted: #64748b;
+  --sp-border: #e5eaf2;
+  background: #f3f6fb;
+  color: #17233d;
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+/* Sidebar */
+.supply-app aside {
+  background: var(--sp-dark);
+  border-color: #263450;
+  color: white;
+}
+
+.supply-app aside > div:first-child {
+  border-color: #263450;
+}
+
+.supply-app aside h1 {
+  color: white;
+}
+
+.supply-app aside p {
+  color: #9eacc5;
+}
+
+.supply-app aside nav button {
+  color: #bdc9dd;
+  border-radius: 10px;
+  transition: all .2s ease;
+}
+
+.supply-app aside nav button:hover {
+  background: #1e3154;
+  color: white;
+}
+
+.supply-app aside nav button.bg-blue-600 {
+  background: #2563eb;
+  color: white;
+  box-shadow: 0 5px 16px rgba(37, 99, 235, .25);
+}
+
+/* Main page */
+.supply-app main {
+  background: #f3f6fb;
+}
+
+.supply-app main header h2 {
+  color: #14213d;
+  letter-spacing: -1px;
+}
+
+/* Cards and sections */
+.supply-app main article,
+.supply-app main section.rounded-2xl {
+  border: 1px solid var(--sp-border);
+  border-radius: 15px;
+  background: white;
+  box-shadow: 0 2px 5px rgba(15, 23, 42, .035);
+  transition: box-shadow .2s ease;
+}
+
+.supply-app main article:hover {
+  box-shadow: 0 5px 16px rgba(15, 23, 42, .06);
+}
+
+/* Headings */
+.supply-app main h3 {
+  color: #17233d;
+  letter-spacing: -.35px;
+}
+
+.supply-app main h4 {
+  color: #17233d;
+}
+
+/* Buttons */
+.supply-app main button {
+  transition: background-color .2s ease,
+    box-shadow .2s ease,
+    transform .2s ease;
+}
+
+.supply-app main button:not(:disabled):active {
+  transform: scale(.98);
+}
+
+.supply-app main button.bg-blue-600,
+.supply-app main button.bg-violet-600,
+.supply-app main button.bg-emerald-600 {
+  box-shadow: 0 3px 8px rgba(37, 99, 235, .12);
+}
+
+.supply-app main button:focus-visible,
+.supply-app main input:focus-visible,
+.supply-app main select:focus-visible {
+  outline: 3px solid rgba(37, 99, 235, .18);
+  outline-offset: 2px;
+}
+
+/* Form controls */
+.supply-app main input,
+.supply-app main select {
+  border-radius: 9px;
+  border-color: #dce4ef;
+  color: #17233d;
+  background-color: white;
+  min-height: 42px;
+}
+
+.supply-app main input::placeholder {
+  color: #94a3b8;
+}
+
+/* Tables */
+.supply-app main table {
+  border-collapse: separate;
+  border-spacing: 0;
+  width: 100%;
+}
+
+.supply-app main table thead {
+  background: #f6f8fc;
+}
+
+.supply-app main table th {
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .045em;
+  padding-top: 15px;
+  padding-bottom: 15px;
+}
+
+.supply-app main table td {
+  color: #334155;
+  padding-top: 15px;
+  padding-bottom: 15px;
+}
+
+.supply-app main table tbody tr:hover {
+  background: #f6f9ff;
+}
+
+/* Recommendation option cards */
+.supply-app main button.border-2 {
+  border-radius: 14px;
+}
+
+.supply-app main button.border-2.border-blue-600 {
+  background: #eff6ff;
+  border-color: #2563eb;
+  box-shadow: 0 5px 16px rgba(37, 99, 235, .10);
+}
+
+/* KPI cards */
+.supply-app main .text-3xl.font-bold {
+  letter-spacing: -.8px;
+}
+
+/* Alert and status panels */
+.supply-app main [role="alert"],
+.supply-app main [role="status"] {
+  border-radius: 10px;
+}
+
+/* Footer */
+.supply-app main footer {
+  color: #94a3b8;
+}
+
+/* Scrollbar */
+.supply-app main ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.supply-app main ::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 20px;
+}
+
+.supply-app main ::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Responsive layout */
+@media (max-width: 767px) {
+  .supply-app aside {
+    position: relative;
+    height: auto;
+  }
+
+  .supply-app aside nav {
+    padding: 10px;
+  }
+
+  .supply-app main {
+    padding: 16px;
+  }
+
+  .supply-app main header h2 {
+    font-size: 25px;
+  }
+}
