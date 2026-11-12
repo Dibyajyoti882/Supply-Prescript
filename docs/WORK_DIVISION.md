@@ -49,9 +49,9 @@ Legend: [x] done, [ ] pending. Update this file when a task is finished.
 - [x] Database connection code using environment variables (`backend/db.py`)
 - [x] FastAPI skeleton with home and health endpoints (`backend/main.py`)
 - [x] `.env.example` with sample database settings
-- [ ] Install PostgreSQL, create database `supplyprescript`, run `schema.sql`
-- [ ] Test the database connection and the API
-- [ ] Load `shipments.csv` into the database (`backend/load_data.py`)
+- [x] Install PostgreSQL, create database `supplyprescript`, run `schema.sql`
+- [x] Test the database connection and the API
+- [x] Load `shipments.csv` into the database (`backend/load_data.py`)
 
 ### Week 2: Prescriptive UI
 - [ ] Endpoint `GET /prescriptions/{shipment_id}` (use the solver output format)
